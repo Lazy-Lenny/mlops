@@ -10,3 +10,4 @@ mlflow.db
 .trash/
 .idea
 /src/artifacts/
+.dvc

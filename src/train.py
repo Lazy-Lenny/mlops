@@ -1,14 +1,15 @@
-from __future__ import annotations
-
 import argparse
 import os
 import warnings
 
+import joblib
 import matplotlib.pyplot as plt
 import mlflow
 import mlflow.sklearn
 import pandas as pd
+from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.impute import SimpleImputer
 from sklearn.metrics import (
     ConfusionMatrixDisplay,
     accuracy_score,
@@ -17,22 +18,26 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
-from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
-
-from preprocess import build_preprocessor, load_data, split_features_target
+from sklearn.preprocessing import OneHotEncoder
 
 warnings.filterwarnings("ignore")
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Train churn model with MLflow")
+    parser = argparse.ArgumentParser(description="Train churn model from prepared data")
 
     parser.add_argument(
-        "--data_path",
+        "--train_path",
         type=str,
-        default="../data/raw/WA_Fn-UseC_-Telco-Customer-Churn.csv",
-        help="Path to input CSV file",
+        default="data/prepared/train.csv",
+        help="Path to prepared train CSV",
+    )
+    parser.add_argument(
+        "--test_path",
+        type=str,
+        default="data/prepared/test.csv",
+        help="Path to prepared test CSV",
     )
     parser.add_argument(
         "--experiment_name",
@@ -43,14 +48,14 @@ def parse_args():
     parser.add_argument(
         "--run_name",
         type=str,
-        default="random_forest_baseline",
+        default="random_forest_refactored",
         help="MLflow run name",
     )
     parser.add_argument(
-        "--test_size",
-        type=float,
-        default=0.2,
-        help="Test size for train_test_split",
+        "--target_col",
+        type=str,
+        default="Churn",
+        help="Target column name",
     )
     parser.add_argument(
         "--random_state",
@@ -59,70 +64,84 @@ def parse_args():
         help="Random seed",
     )
 
-    # hyperparameters
-    parser.add_argument(
-        "--n_estimators",
-        type=int,
-        default=200,
-        help="Number of trees in RandomForest",
-    )
-    parser.add_argument(
-        "--max_depth",
-        type=int,
-        default=10,
-        help="Maximum tree depth",
-    )
-    parser.add_argument(
-        "--min_samples_split",
-        type=int,
-        default=5,
-        help="Minimum samples required to split",
-    )
-    parser.add_argument(
-        "--min_samples_leaf",
-        type=int,
-        default=2,
-        help="Minimum samples required in leaf",
-    )
+    parser.add_argument("--n_estimators", type=int, default=200)
+    parser.add_argument("--max_depth", type=int, default=10)
+    parser.add_argument("--min_samples_split", type=int, default=5)
+    parser.add_argument("--min_samples_leaf", type=int, default=2)
 
-    # tags
+    parser.add_argument("--author", type=str, default="student")
+    parser.add_argument("--dataset_version", type=str, default="v1")
+    parser.add_argument("--model_type", type=str, default="RandomForest")
+
     parser.add_argument(
-        "--author",
+        "--model_output_dir",
         type=str,
-        default="student",
-        help="Run author for MLflow tag",
+        default="models",
+        help="Directory to save trained model locally",
     )
     parser.add_argument(
-        "--dataset_version",
+        "--model_filename",
         type=str,
-        default="v1",
-        help="Dataset version tag",
+        default="model.joblib",
+        help="Filename for saved model",
     )
     parser.add_argument(
-        "--model_type",
+        "--artifacts_dir",
         type=str,
-        default="RandomForest",
-        help="Model type tag",
+        default="artifacts",
+        help="Directory to save plots and reports locally",
     )
 
     return parser.parse_args()
 
 
-def main():
-    args = parse_args()
-    os.makedirs("artifacts", exist_ok=True)
+def split_xy(df: pd.DataFrame, target_col: str):
+    df = df.copy()
+    y = df[target_col].map({"No": 0, "Yes": 1})
+    X = df.drop(columns=[target_col])
+    return X, y
 
-    df = load_data(args.data_path)
-    X, y = split_features_target(df, target_col="Churn")
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=args.test_size,
-        random_state=args.random_state,
-        stratify=y,
+
+def build_preprocessor(X: pd.DataFrame) -> ColumnTransformer:
+    categorical_cols = X.select_dtypes(include=["object", "category"]).columns.tolist()
+    numeric_cols = X.select_dtypes(include=["int64", "float64"]).columns.tolist()
+
+    numeric_transformer = Pipeline(
+        steps=[
+            ("imputer", SimpleImputer(strategy="median")),
+        ]
     )
 
-    preprocessor = build_preprocessor(X)
+    categorical_transformer = Pipeline(
+        steps=[
+            ("imputer", SimpleImputer(strategy="most_frequent")),
+            ("encoder", OneHotEncoder(handle_unknown="ignore")),
+        ]
+    )
+
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("num", numeric_transformer, numeric_cols),
+            ("cat", categorical_transformer, categorical_cols),
+        ]
+    )
+
+    return preprocessor
+
+
+def main():
+    args = parse_args()
+
+    os.makedirs(args.model_output_dir, exist_ok=True)
+    os.makedirs(args.artifacts_dir, exist_ok=True)
+
+    train_df = pd.read_csv(args.train_path)
+    test_df = pd.read_csv(args.test_path)
+
+    X_train, y_train = split_xy(train_df, args.target_col)
+    X_test, y_test = split_xy(test_df, args.target_col)
+
+    preprocessor = build_preprocessor(X_train)
 
     model = RandomForestClassifier(
         n_estimators=args.n_estimators,
@@ -143,19 +162,23 @@ def main():
     mlflow.set_experiment(args.experiment_name)
 
     with mlflow.start_run(run_name=args.run_name):
-        mlflow.log_param("test_size", args.test_size)
+        mlflow.log_param("train_path", args.train_path)
+        mlflow.log_param("test_path", args.test_path)
+        mlflow.log_param("target_col", args.target_col)
         mlflow.log_param("random_state", args.random_state)
         mlflow.log_param("n_estimators", args.n_estimators)
         mlflow.log_param("max_depth", args.max_depth)
         mlflow.log_param("min_samples_split", args.min_samples_split)
         mlflow.log_param("min_samples_leaf", args.min_samples_leaf)
-        mlflow.log_param("data_path", args.data_path)
+        mlflow.log_param("model_output_dir", args.model_output_dir)
+        mlflow.log_param("model_filename", args.model_filename)
+        mlflow.log_param("artifacts_dir", args.artifacts_dir)
 
         mlflow.set_tag("author", args.author)
         mlflow.set_tag("dataset_version", args.dataset_version)
         mlflow.set_tag("model_type", args.model_type)
         mlflow.set_tag("project", "telco-churn-prediction")
-        mlflow.set_tag("stage", "baseline")
+        mlflow.set_tag("stage", "train")
 
         pipeline.fit(X_train, y_train)
 
@@ -171,17 +194,20 @@ def main():
         }
         mlflow.log_metrics(metrics)
 
-        mlflow.sklearn.log_model(
-            sk_model=pipeline,
-            artifact_path="model",
-        )
+        # MLflow model logging
+        mlflow.sklearn.log_model(pipeline, artifact_path="model")
+
+        # Local model saving
+        model_path = os.path.join(args.model_output_dir, args.model_filename)
+        joblib.dump(pipeline, model_path)
+        mlflow.log_artifact(model_path)
 
         fig, ax = plt.subplots(figsize=(6, 5))
         ConfusionMatrixDisplay.from_predictions(y_test, y_pred, ax=ax)
         ax.set_title("Confusion Matrix")
         fig.tight_layout()
 
-        cm_path = "artifacts/confusion_matrix.png"
+        cm_path = os.path.join(args.artifacts_dir, "confusion_matrix.png")
         plt.savefig(cm_path, dpi=150, bbox_inches="tight")
         plt.close(fig)
         mlflow.log_artifact(cm_path)
@@ -189,17 +215,11 @@ def main():
         feature_names = pipeline.named_steps["preprocessor"].get_feature_names_out()
         importances = pipeline.named_steps["model"].feature_importances_
 
-        fi_df = (
-            pd.DataFrame(
-                {
-                    "feature": feature_names,
-                    "importance": importances,
-                }
-            )
-            .sort_values("importance", ascending=False)
-        )
+        fi_df = pd.DataFrame(
+            {"feature": feature_names, "importance": importances}
+        ).sort_values("importance", ascending=False)
 
-        fi_csv_path = "artifacts/feature_importance.csv"
+        fi_csv_path = os.path.join(args.artifacts_dir, "feature_importance.csv")
         fi_df.to_csv(fi_csv_path, index=False)
         mlflow.log_artifact(fi_csv_path)
 
@@ -218,7 +238,7 @@ def main():
         ax.set_ylabel("Feature")
         fig.tight_layout()
 
-        fi_plot_path = "artifacts/feature_importance_top20.png"
+        fi_plot_path = os.path.join(args.artifacts_dir, "feature_importance_top20.png")
         plt.savefig(fi_plot_path, dpi=150, bbox_inches="tight")
         plt.close(fig)
         mlflow.log_artifact(fi_plot_path)
@@ -233,7 +253,8 @@ def main():
         print("\n=== Top 10 Important Features ===")
         print(fi_df.head(10).to_string(index=False))
 
-        print("\nRun completed successfully.")
+        print(f"\nLocal model saved to: {model_path}")
+        print("Training completed successfully.")
 
 
 if __name__ == "__main__":

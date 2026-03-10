@@ -1,0 +1,39 @@
+schema: '2.0'
+stages:
+  prepare:
+    cmd: python src/prepare.py 
+      --input_file=data/raw/WA_Fn-UseC_-Telco-Customer-Churn.csv 
+      --output_dir=data/prepared
+    deps:
+    - path: data/raw/WA_Fn-UseC_-Telco-Customer-Churn.csv
+      hash: md5
+      md5: 0f9de68e012bd3aed5fa7cdc9fc421af
+      size: 977501
+    - path: src/prepare.py
+      hash: md5
+      md5: 9699b3efed3a67a13af695d3bafdf181
+      size: 2919
+    outs:
+    - path: data/prepared
+      hash: md5
+      md5: fa3b13e2b76378185b51cc651a8f2992.dir
+      size: 1045988
+      nfiles: 2
+  train:
+    cmd: python src/train.py --model_output_dir=data/models
+    deps:
+    - path: data/prepared
+      hash: md5
+      md5: fa3b13e2b76378185b51cc651a8f2992.dir
+      size: 1045988
+      nfiles: 2
+    - path: src/train.py
+      hash: md5
+      md5: a50d1bc07b71a0ed8953db7ca1a51e1d
+      size: 8298
+    outs:
+    - path: data/models
+      hash: md5
+      md5: b1062bfae3849a76bc66b475e48cf513.dir
+      size: 10140219
+      nfiles: 1

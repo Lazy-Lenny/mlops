@@ -6,6 +6,7 @@ venv/
 mlruns/
 artifacts/
 mlflow.db
+data/
 .trash/
 .idea
 /src/artifacts/

@@ -1,0 +1,15 @@
+stages:
+  prepare:
+    cmd: python src/prepare.py --input_file=data/raw/WA_Fn-UseC_-Telco-Customer-Churn.csv --output_dir=data/prepared
+    deps:
+     - data/raw/WA_Fn-UseC_-Telco-Customer-Churn.csv
+     - src/prepare.py
+    outs:
+     - data/prepared
+  train:
+    cmd: python src/train.py --model_output_dir=data/models
+    deps:
+     - data/prepared
+     - src/train.py
+    outs:
+     - data/models

@@ -8,5 +8,5 @@ mlruns/
 artifacts/
 mlflow.db
 .trash/
-.idea/
+.idea
 /src/artifacts/

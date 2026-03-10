@@ -2,7 +2,6 @@ __pycache__/
 *.py[cod]
 venv/
 .env
-data/
 .ipynb_checkpoints
 mlruns/
 artifacts/
@@ -10,4 +9,3 @@ mlflow.db
 .trash/
 .idea
 /src/artifacts/
-.dvc

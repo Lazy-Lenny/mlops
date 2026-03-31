@@ -4,5 +4,7 @@ scikit-learn
 matplotlib
 seaborn
 mlflow
+optuna
+hydra-core
 jupyter
 dvc

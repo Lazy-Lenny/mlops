@@ -20,7 +20,7 @@ stages:
       size: 1045988
       nfiles: 2
   train:
-    cmd: python src/train.py --model_output_dir=data/models
+    cmd: python src/train.py --model_output_dir=data/models --max_depth=20
     deps:
     - path: data/prepared
       hash: md5
@@ -34,6 +34,6 @@ stages:
     outs:
     - path: data/models
       hash: md5
-      md5: b1062bfae3849a76bc66b475e48cf513.dir
-      size: 10140219
+      md5: c9fc5c78e043dccb67acf80ad72e31d5.dir
+      size: 20600219
       nfiles: 1

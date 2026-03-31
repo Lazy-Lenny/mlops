@@ -10,6 +10,7 @@ import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     ConfusionMatrixDisplay,
     accuracy_score,
@@ -68,10 +69,19 @@ def parse_args():
     parser.add_argument("--max_depth", type=int, default=10)
     parser.add_argument("--min_samples_split", type=int, default=5)
     parser.add_argument("--min_samples_leaf", type=int, default=2)
+    parser.add_argument("--C", type=float, default=1.0)
+    parser.add_argument("--solver", type=str, default="lbfgs")
+    parser.add_argument("--penalty", type=str, default="l2")
+    parser.add_argument("--max_iter", type=int, default=2000)
 
     parser.add_argument("--author", type=str, default="student")
     parser.add_argument("--dataset_version", type=str, default="v1")
-    parser.add_argument("--model_type", type=str, default="RandomForest")
+    parser.add_argument(
+        "--model_type",
+        type=str,
+        default="random_forest",
+        choices=["random_forest", "logistic_regression"],
+    )
 
     parser.add_argument(
         "--model_output_dir",
@@ -143,14 +153,23 @@ def main():
 
     preprocessor = build_preprocessor(X_train)
 
-    model = RandomForestClassifier(
-        n_estimators=args.n_estimators,
-        max_depth=args.max_depth,
-        min_samples_split=args.min_samples_split,
-        min_samples_leaf=args.min_samples_leaf,
-        random_state=args.random_state,
-        n_jobs=-1,
-    )
+    if args.model_type == "random_forest":
+        model = RandomForestClassifier(
+            n_estimators=args.n_estimators,
+            max_depth=args.max_depth,
+            min_samples_split=args.min_samples_split,
+            min_samples_leaf=args.min_samples_leaf,
+            random_state=args.random_state,
+            n_jobs=-1,
+        )
+    else:
+        model = LogisticRegression(
+            C=args.C,
+            solver=args.solver,
+            penalty=args.penalty,
+            max_iter=args.max_iter,
+            random_state=args.random_state,
+        )
 
     pipeline = Pipeline(
         steps=[
@@ -170,6 +189,10 @@ def main():
         mlflow.log_param("max_depth", args.max_depth)
         mlflow.log_param("min_samples_split", args.min_samples_split)
         mlflow.log_param("min_samples_leaf", args.min_samples_leaf)
+        mlflow.log_param("C", args.C)
+        mlflow.log_param("solver", args.solver)
+        mlflow.log_param("penalty", args.penalty)
+        mlflow.log_param("max_iter", args.max_iter)
         mlflow.log_param("model_output_dir", args.model_output_dir)
         mlflow.log_param("model_filename", args.model_filename)
         mlflow.log_param("artifacts_dir", args.artifacts_dir)
@@ -213,32 +236,43 @@ def main():
         mlflow.log_artifact(cm_path)
 
         feature_names = pipeline.named_steps["preprocessor"].get_feature_names_out()
-        importances = pipeline.named_steps["model"].feature_importances_
+        model_step = pipeline.named_steps["model"]
 
-        fi_df = pd.DataFrame(
-            {"feature": feature_names, "importance": importances}
-        ).sort_values("importance", ascending=False)
+        if hasattr(model_step, "feature_importances_"):
+            scores = model_step.feature_importances_
+            score_col = "importance"
+            artifact_prefix = "feature_importance"
+            title = "Top 20 Feature Importances"
+        else:
+            scores = abs(model_step.coef_[0])
+            score_col = "weight_abs"
+            artifact_prefix = "feature_weights"
+            title = "Top 20 Logistic Regression Weights (abs)"
 
-        fi_csv_path = os.path.join(args.artifacts_dir, "feature_importance.csv")
+        fi_df = pd.DataFrame({"feature": feature_names, score_col: scores}).sort_values(
+            score_col, ascending=False
+        )
+
+        fi_csv_path = os.path.join(args.artifacts_dir, f"{artifact_prefix}.csv")
         fi_df.to_csv(fi_csv_path, index=False)
         mlflow.log_artifact(fi_csv_path)
 
         top20_fi = fi_df.head(20)
 
         fig, ax = plt.subplots(figsize=(10, 6))
-        top20_fi.sort_values("importance").plot(
+        top20_fi.sort_values(score_col).plot(
             x="feature",
-            y="importance",
+            y=score_col,
             kind="barh",
             ax=ax,
             legend=False,
         )
-        ax.set_title("Top 20 Feature Importances")
-        ax.set_xlabel("Importance")
+        ax.set_title(title)
+        ax.set_xlabel(score_col)
         ax.set_ylabel("Feature")
         fig.tight_layout()
 
-        fi_plot_path = os.path.join(args.artifacts_dir, "feature_importance_top20.png")
+        fi_plot_path = os.path.join(args.artifacts_dir, f"{artifact_prefix}_top20.png")
         plt.savefig(fi_plot_path, dpi=150, bbox_inches="tight")
         plt.close(fig)
         mlflow.log_artifact(fi_plot_path)

@@ -1,0 +1,25 @@
+defaults:
+  - model: random_forest
+  - hpo: optuna
+  - _self_
+
+seed: 42
+target_col: "Churn"
+
+data:
+  train_path: "data/prepared/train.csv"
+  test_path: "data/prepared/test.csv"
+
+mlflow:
+  tracking_uri: "http://127.0.0.1:5000"
+  experiment_name: "HPO_Lab3"
+  parent_run_name: "optuna_study"
+  log_model: true
+  register_model: true
+  model_name: "BestOptimizedModel"
+  stage: "Staging"
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null

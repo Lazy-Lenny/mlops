@@ -1,0 +1,16 @@
+sampler: "grid"
+n_trials: 999
+metric: "f1"
+direction: "maximize"
+use_cv: false
+cv_folds: 5
+grid_search_space:
+  random_forest:
+    n_estimators: [50, 100, 200]
+    max_depth: [5, 10, 15]
+    min_samples_split: [2, 5, 10]
+    min_samples_leaf: [1, 2, 4]
+  logistic_regression:
+    C: [0.01, 0.1, 1.0, 10.0]
+    solver: ["liblinear"]
+    penalty: ["l2"]

@@ -7,7 +7,7 @@ stages:
     outs:
      - data/prepared
   train:
-    cmd: python src/train.py --model_output_dir=data/models
+    cmd: python src/train.py --model_output_dir=data/models --model_type=random_forest --max_depth=20
     deps:
      - data/prepared
      - src/train.py

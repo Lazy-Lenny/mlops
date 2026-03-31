@@ -1,0 +1,11 @@
+type: "logistic_regression"
+fixed_params:
+  max_iter: 6000
+search_space:
+  C:
+    low: 0.001
+    high: 100.0
+  solver:
+    choices: ["liblinear", "lbfgs"]
+  penalty:
+    choices: ["l2"]

@@ -1,0 +1,6 @@
+sampler: "random"
+n_trials: 20
+metric: "f1"
+direction: "maximize"
+use_cv: false
+cv_folds: 5

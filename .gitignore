@@ -69,6 +69,8 @@ mlartifacts/
 mlflow.db
 **/mlflow.db
 
+.airflow_ci/
+
 # --- Hydra / Optuna local runs ---
 outputs/
 multirun/

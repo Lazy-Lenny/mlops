@@ -1,0 +1,10 @@
+# Lean runtime deps for slim Docker image (no Jupyter / lab notebooks)
+pandas
+numpy
+scikit-learn
+matplotlib
+seaborn
+mlflow
+optuna
+hydra-core
+dvc

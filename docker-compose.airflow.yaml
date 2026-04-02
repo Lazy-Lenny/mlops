@@ -1,0 +1,66 @@
+# Local Apache Airflow + Postgres. ML code and data: bind mount at /opt/mlops.
+# Usage:
+#   cp airflow.env.example airflow.env   # optional overrides
+#   docker compose -f docker-compose.airflow.yaml up --build
+# Web UI: http://localhost:8080 (admin / admin)
+# On Linux, host.docker.internal is mapped via extra_hosts for MLflow on the host.
+
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: Dockerfile.airflow
+  image: mlops-airflow:2.8.1
+  env_file:
+    - airflow.env
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/logs:/opt/airflow/logs
+    - ./airflow/plugins:/opt/airflow/plugins
+    - ./:/opt/mlops
+  # Match AIRFLOW_UID in airflow.env; on Linux use id -u if permission errors on logs volume.
+  user: "50000:0"
+  depends_on:
+    postgres:
+      condition: service_healthy
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
+services:
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate && \
+        airflow users create \
+          --username admin --password admin \
+          --firstname Admin --lastname User \
+          --role Admin --email admin@example.com || true
+    restart: "no"
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+
+volumes:
+  postgres-db-volume:

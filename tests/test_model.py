@@ -2,10 +2,13 @@ import json
 from pathlib import Path
 
 import pandas as pd
+from hydra import compose, initialize_config_dir
 
 
 ROOT = Path(__file__).resolve().parents[1]
 TRAIN_CSV = ROOT / "data" / "prepared" / "train.csv"
+TRAIN_CSV_FIXTURE = ROOT / "tests" / "fixtures" / "prepared_train_sample.csv"
+CONFIG_DIR = ROOT / "config"
 MODEL_DIR = ROOT / "data" / "models"
 METRICS_PATH = MODEL_DIR / "metrics.json"
 MODEL_PATH = MODEL_DIR / "model.pkl"
@@ -22,20 +25,29 @@ REQUIRED_COLUMNS = [
 
 
 def test_pretrain_required_columns_exist():
-    assert TRAIN_CSV.exists(), f"Missing dataset: {TRAIN_CSV}"
-    df = pd.read_csv(TRAIN_CSV, nrows=200)
+    train_path = TRAIN_CSV if TRAIN_CSV.exists() else TRAIN_CSV_FIXTURE
+    assert train_path.exists(), (
+        f"Missing dataset: neither {TRAIN_CSV} nor fixture {TRAIN_CSV_FIXTURE}"
+    )
+    df = pd.read_csv(train_path, nrows=200)
     missing_cols = [col for col in REQUIRED_COLUMNS if col not in df.columns]
     assert not missing_cols, f"Missing required columns: {missing_cols}"
     assert df["Churn"].notna().all(), "Target column Churn contains nulls"
 
 
 def test_pretrain_hydra_config_is_valid():
-    config_path = ROOT / "config" / "config.yaml"
-    assert config_path.exists(), "Missing Hydra base config"
-    text = config_path.read_text(encoding="utf-8")
+    assert CONFIG_DIR.is_dir(), f"Missing Hydra config dir: {CONFIG_DIR}"
+    base_config = CONFIG_DIR / "config.yaml"
+    assert base_config.exists(), "Missing Hydra base config.yaml"
+    # Hydra does not expose the `hydra:` overrides block on the composed cfg (struct has no `hydra` key).
+    text = base_config.read_text(encoding="utf-8")
     assert "defaults:" in text
     assert "hydra:" in text
     assert "run:" in text
+    with initialize_config_dir(version_base=None, config_dir=str(CONFIG_DIR)):
+        cfg = compose(config_name="config")
+    assert cfg.data.train_path and cfg.data.test_path
+    assert hasattr(cfg.hpo, "oversample"), "hpo.oversample missing (check config/hpo/*.yaml)"
 
 
 def test_post_train_artifacts_exist():

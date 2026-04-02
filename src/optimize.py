@@ -13,13 +13,15 @@ import mlflow.sklearn
 import optuna
 import pandas as pd
 from omegaconf import DictConfig, OmegaConf
+from sklearn.base import clone
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import f1_score, roc_auc_score
-from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import StratifiedKFold
 from sklearn.pipeline import Pipeline
 
 from preprocess import build_preprocessor, split_features_target
+from sampling import random_oversample_binary
 
 
 def _normalize_model_name(raw_value: str) -> str:
@@ -127,11 +129,14 @@ def suggest_model_params(trial: optuna.trial.Trial, cfg: DictConfig) -> dict[str
     raise ValueError(f"Unsupported model type: {model_type}")
 
 
-def build_estimator(model_type: str, params: dict[str, Any]):
+def build_estimator(
+    model_type: str, params: dict[str, Any], *, class_weight: str | None
+):
+    merged = {**params, "class_weight": class_weight}
     if model_type == "random_forest":
-        return RandomForestClassifier(**params)
+        return RandomForestClassifier(**merged)
     if model_type == "logistic_regression":
-        return LogisticRegression(**params)
+        return LogisticRegression(**merged)
     raise ValueError(f"Unsupported model type: {model_type}")
 
 
@@ -156,23 +161,37 @@ def score_holdout(
     raise ValueError(f"Unsupported metric: {metric_name}")
 
 
-def score_cv(
+def score_cv_stratified(
     pipeline: Pipeline,
     x_train: pd.DataFrame,
     y_train: pd.Series,
     metric_name: str,
     cv_folds: int,
+    random_state: int,
+    *,
+    oversample_train_fold: bool,
 ) -> float:
-    scoring = "f1" if metric_name == "f1" else "roc_auc"
-    cv_scores = cross_val_score(
-        pipeline,
-        x_train,
-        y_train,
-        cv=cv_folds,
-        scoring=scoring,
-        n_jobs=-1,
+    skf = StratifiedKFold(
+        n_splits=cv_folds, shuffle=True, random_state=random_state
     )
-    return float(cv_scores.mean())
+    scores: list[float] = []
+    for train_idx, val_idx in skf.split(x_train, y_train):
+        X_tr = x_train.iloc[train_idx]
+        y_tr = y_train.iloc[train_idx]
+        X_val = x_train.iloc[val_idx]
+        y_val = y_train.iloc[val_idx]
+        if oversample_train_fold:
+            X_tr, y_tr = random_oversample_binary(X_tr, y_tr, random_state=random_state)
+        fold_pipeline = clone(pipeline)
+        fold_pipeline.fit(X_tr, y_tr)
+        if metric_name == "f1":
+            scores.append(float(f1_score(y_val, fold_pipeline.predict(X_val))))
+        elif metric_name == "roc_auc":
+            y_proba = fold_pipeline.predict_proba(X_val)[:, 1]
+            scores.append(float(roc_auc_score(y_val, y_proba)))
+        else:
+            raise ValueError(f"Unsupported metric: {metric_name}")
+    return float(sum(scores) / len(scores))
 
 
 def create_objective(
@@ -182,9 +201,13 @@ def create_objective(
     x_test: pd.DataFrame,
     y_test: pd.Series,
 ):
+    class_weight = None if cfg.hpo.oversample else "balanced"
+
     def objective(trial: optuna.trial.Trial) -> float:
         params = suggest_model_params(trial, cfg)
-        estimator = build_estimator(cfg.model.type, params)
+        estimator = build_estimator(
+            cfg.model.type, params, class_weight=class_weight
+        )
         preprocessor = build_preprocessor(x_train)
         pipeline = Pipeline(
             [
@@ -205,12 +228,14 @@ def create_objective(
             )
 
             if cfg.hpo.use_cv:
-                value = score_cv(
+                value = score_cv_stratified(
                     pipeline,
                     x_train,
                     y_train,
                     cfg.hpo.metric,
                     cfg.hpo.cv_folds,
+                    cfg.seed,
+                    oversample_train_fold=cfg.hpo.oversample,
                 )
             else:
                 value = score_holdout(
@@ -239,6 +264,9 @@ def main(cfg: DictConfig) -> None:
     x_train, y_train = split_features_target(train_df, target_col=cfg.target_col)
     x_test, y_test = split_features_target(test_df, target_col=cfg.target_col)
 
+    if cfg.hpo.oversample and not cfg.hpo.use_cv:
+        x_train, y_train = random_oversample_binary(x_train, y_train, cfg.seed)
+
     sampler = build_sampler(cfg)
     study = optuna.create_study(
         direction=cfg.hpo.direction,
@@ -257,6 +285,7 @@ def main(cfg: DictConfig) -> None:
                 "model_type": cfg.model.type,
                 "use_cv": cfg.hpo.use_cv,
                 "cv_folds": cfg.hpo.cv_folds,
+                "oversample": cfg.hpo.oversample,
             }
         )
 
@@ -278,14 +307,20 @@ def main(cfg: DictConfig) -> None:
         best_estimator_params.update(
             OmegaConf.to_container(cfg.model.fixed_params, resolve=True)
         )
-        best_estimator = build_estimator(cfg.model.type, best_estimator_params)
+        fit_class_weight = None if cfg.hpo.oversample else "balanced"
+        best_estimator = build_estimator(
+            cfg.model.type, best_estimator_params, class_weight=fit_class_weight
+        )
         best_pipeline = Pipeline(
             [
                 ("preprocessor", build_preprocessor(x_train)),
                 ("model", best_estimator),
             ]
         )
-        best_pipeline.fit(x_train, y_train)
+        x_fit, y_fit = x_train, y_train
+        if cfg.hpo.oversample and cfg.hpo.use_cv:
+            x_fit, y_fit = random_oversample_binary(x_train, y_train, cfg.seed)
+        best_pipeline.fit(x_fit, y_fit)
 
         os.makedirs("artifacts", exist_ok=True)
         best_model_path = os.path.join("artifacts", "best_model.pkl")

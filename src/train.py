@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import warnings
 
@@ -21,6 +22,8 @@ from sklearn.metrics import (
 )
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
+
+from sampling import random_oversample_binary
 
 warnings.filterwarnings("ignore")
 
@@ -65,10 +68,10 @@ def parse_args():
         help="Random seed",
     )
 
-    parser.add_argument("--n_estimators", type=int, default=200)
-    parser.add_argument("--max_depth", type=int, default=10)
-    parser.add_argument("--min_samples_split", type=int, default=5)
-    parser.add_argument("--min_samples_leaf", type=int, default=2)
+    parser.add_argument("--n_estimators", type=int, default=257)
+    parser.add_argument("--max_depth", type=int, default=9)
+    parser.add_argument("--min_samples_split", type=int, default=8)
+    parser.add_argument("--min_samples_leaf", type=int, default=5)
     parser.add_argument("--C", type=float, default=1.0)
     parser.add_argument("--solver", type=str, default="lbfgs")
     parser.add_argument("--penalty", type=str, default="l2")
@@ -86,13 +89,13 @@ def parse_args():
     parser.add_argument(
         "--model_output_dir",
         type=str,
-        default="models",
+        default="data/models",
         help="Directory to save trained model locally",
     )
     parser.add_argument(
         "--model_filename",
         type=str,
-        default="model.joblib",
+        default="model.pkl",
         help="Filename for saved model",
     )
     parser.add_argument(
@@ -100,6 +103,34 @@ def parse_args():
         type=str,
         default="artifacts",
         help="Directory to save plots and reports locally",
+    )
+    parser.add_argument(
+        "--metrics_filename",
+        type=str,
+        default="metrics.json",
+        help="Filename for metrics JSON",
+    )
+    parser.add_argument(
+        "--confusion_matrix_filename",
+        type=str,
+        default="confusion_matrix.png",
+        help="Filename for confusion matrix image",
+    )
+    parser.add_argument(
+        "--max_rows",
+        type=int,
+        default=0,
+        help="Optional row limit for CI speedup (0 means all rows)",
+    )
+    parser.add_argument(
+        "--ci_mode",
+        action="store_true",
+        help="Enable CI-friendly fast training settings",
+    )
+    parser.add_argument(
+        "--no_oversample",
+        action="store_true",
+        help="Disable random oversampling of the minority class on the training set",
     )
 
     return parser.parse_args()
@@ -141,25 +172,38 @@ def build_preprocessor(X: pd.DataFrame) -> ColumnTransformer:
 
 def main():
     args = parse_args()
+    ci_mode = args.ci_mode or os.getenv("CI", "").lower() == "true"
 
     os.makedirs(args.model_output_dir, exist_ok=True)
     os.makedirs(args.artifacts_dir, exist_ok=True)
 
     train_df = pd.read_csv(args.train_path)
     test_df = pd.read_csv(args.test_path)
+    if args.max_rows and args.max_rows > 0:
+        train_df = train_df.head(args.max_rows).copy()
+        test_df = test_df.head(max(1, args.max_rows // 4)).copy()
 
     X_train, y_train = split_xy(train_df, args.target_col)
     X_test, y_test = split_xy(test_df, args.target_col)
 
+    use_oversample = not args.no_oversample
+    if use_oversample:
+        X_train, y_train = random_oversample_binary(
+            X_train, y_train, random_state=args.random_state
+        )
+
     preprocessor = build_preprocessor(X_train)
+    class_weight = None if use_oversample else "balanced"
 
     if args.model_type == "random_forest":
+        n_estimators = min(args.n_estimators, 80) if ci_mode else args.n_estimators
         model = RandomForestClassifier(
-            n_estimators=args.n_estimators,
+            n_estimators=n_estimators,
             max_depth=args.max_depth,
             min_samples_split=args.min_samples_split,
             min_samples_leaf=args.min_samples_leaf,
             random_state=args.random_state,
+            class_weight=class_weight,
             n_jobs=-1,
         )
     else:
@@ -169,6 +213,7 @@ def main():
             penalty=args.penalty,
             max_iter=args.max_iter,
             random_state=args.random_state,
+            class_weight=class_weight,
         )
 
     pipeline = Pipeline(
@@ -196,6 +241,13 @@ def main():
         mlflow.log_param("model_output_dir", args.model_output_dir)
         mlflow.log_param("model_filename", args.model_filename)
         mlflow.log_param("artifacts_dir", args.artifacts_dir)
+        mlflow.log_param("metrics_filename", args.metrics_filename)
+        mlflow.log_param(
+            "confusion_matrix_filename", args.confusion_matrix_filename
+        )
+        mlflow.log_param("max_rows", args.max_rows)
+        mlflow.log_param("ci_mode", ci_mode)
+        mlflow.log_param("oversample", use_oversample)
 
         mlflow.set_tag("author", args.author)
         mlflow.set_tag("dataset_version", args.dataset_version)
@@ -225,12 +277,17 @@ def main():
         joblib.dump(pipeline, model_path)
         mlflow.log_artifact(model_path)
 
+        metrics_path = os.path.join(args.model_output_dir, args.metrics_filename)
+        with open(metrics_path, "w", encoding="utf-8") as metrics_file:
+            json.dump(metrics, metrics_file, indent=2)
+        mlflow.log_artifact(metrics_path)
+
         fig, ax = plt.subplots(figsize=(6, 5))
         ConfusionMatrixDisplay.from_predictions(y_test, y_pred, ax=ax)
         ax.set_title("Confusion Matrix")
         fig.tight_layout()
 
-        cm_path = os.path.join(args.artifacts_dir, "confusion_matrix.png")
+        cm_path = os.path.join(args.model_output_dir, args.confusion_matrix_filename)
         plt.savefig(cm_path, dpi=150, bbox_inches="tight")
         plt.close(fig)
         mlflow.log_artifact(cm_path)

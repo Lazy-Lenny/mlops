@@ -1,0 +1,76 @@
+name: CML CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  train-and-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      CI: "true"
+      REPO_TOKEN: ${{ secrets.CML_TOKEN || secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install CML
+        uses: iterative/setup-cml@v2
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Pull data with DVC (if remote configured)
+        run: dvc pull || echo "DVC remote is not configured; using repository data."
+
+      - name: Pre-train checks
+        run: pytest tests/test_model.py -k pretrain -q
+
+      - name: Train model (CI fast mode)
+        run: |
+          python src/train.py \
+            --model_type random_forest \
+            --model_output_dir data/models \
+            --model_filename model.pkl \
+            --max_rows 5000 \
+            --ci_mode
+
+      - name: Post-train checks
+        run: pytest tests/test_model.py -k post_train -q
+
+      - name: Compare metrics with baseline
+        run: python ci/compare_metrics.py
+
+      - name: Add confusion matrix preview to report
+        run: cml publish data/models/confusion_matrix.png --md >> report.md
+
+      - name: Comment report in PR
+        if: github.event_name == 'pull_request'
+        run: cml comment create report.md
+
+      - name: Upload final model artifact (CD)
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-pkl
+          path: data/models/model.pkl

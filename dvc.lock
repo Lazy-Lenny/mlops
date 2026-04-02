@@ -20,7 +20,8 @@ stages:
       size: 1045988
       nfiles: 2
   train:
-    cmd: python src/train.py --model_output_dir=data/models --max_depth=20
+    cmd: python src/train.py --model_output_dir=data/models 
+      --model_type=random_forest --max_depth=20
     deps:
     - path: data/prepared
       hash: md5
@@ -29,11 +30,11 @@ stages:
       nfiles: 2
     - path: src/train.py
       hash: md5
-      md5: a50d1bc07b71a0ed8953db7ca1a51e1d
-      size: 8298
+      md5: 718082f55b52eb01e3fd35d21d7c8a2f
+      size: 12931
     outs:
     - path: data/models
       hash: md5
-      md5: c9fc5c78e043dccb67acf80ad72e31d5.dir
-      size: 20600219
-      nfiles: 1
+      md5: f6a5776073266370ed743c0f2a94271b.dir
+      size: 27828679
+      nfiles: 3

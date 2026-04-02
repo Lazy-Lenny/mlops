@@ -1,12 +1,85 @@
+# --- Bytecode & caches ---
 __pycache__/
 *.py[cod]
+*$py.class
+*.so
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+dmypy.json
+
+# --- Virtual environments ---
 venv/
+.venv/
+env/
+ENV/
+.python-version
+
+# --- Packaging / build ---
+build/
+dist/
+*.egg
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+share/python-wheels/
+
+# --- Testing & coverage ---
+.pytest_cache/
+.hypothesis/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.cover
+nosetests.xml
+junit.xml
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- Environment & secrets ---
 .env
-.ipynb_checkpoints
-mlruns/
-artifacts/
-mlflow.db
+.env.*
+!.env.example
+*.pem
+
+# --- IDE / editors ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# --- Logs ---
+*.log
+optimize.log
+
+# --- Project data & trained artifacts (DVC tracks metadata; raw/cache stay local) ---
 data/
-.trash/
-.idea
+
+# --- MLflow ---
+mlruns/
+mlartifacts/
+mlflow.db
+**/mlflow.db
+
+# --- Hydra / Optuna local runs ---
+outputs/
+multirun/
+hydra_outputs/
+.optuna/
+optuna.db
+
+# --- Misc project artifacts ---
+artifacts/
 /src/artifacts/
+.trash/
+
+# --- CML / generated reports ---
+report.md

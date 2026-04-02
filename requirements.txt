@@ -8,3 +8,4 @@ optuna
 hydra-core
 jupyter
 dvc
+pytest

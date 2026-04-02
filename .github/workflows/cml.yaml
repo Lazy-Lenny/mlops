@@ -15,6 +15,7 @@ jobs:
       pull-requests: write
     env:
       CI: "true"
+      MPLBACKEND: Agg
       REPO_TOKEN: ${{ secrets.CML_TOKEN || secrets.GITHUB_TOKEN }}
 
     steps:
@@ -42,6 +43,9 @@ jobs:
 
       - name: Pull data with DVC (if remote configured)
         run: dvc pull || echo "DVC remote is not configured; using repository data."
+
+      - name: Ensure prepared train/test CSV (DVC fallback)
+        run: python ci/ensure_prepared_data.py
 
       - name: Pre-train checks
         run: pytest tests/test_model.py -k pretrain -q

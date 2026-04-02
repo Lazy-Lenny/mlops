@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import warnings
+from pathlib import Path
 
 import joblib
 import matplotlib.pyplot as plt
@@ -170,9 +171,38 @@ def build_preprocessor(X: pd.DataFrame) -> ColumnTransformer:
     return preprocessor
 
 
+def _normalize_mlflow_tracking_uri() -> None:
+    """MLflow expects a URI; bare Windows paths (C:\\...) break scheme parsing (KeyError: 'c')."""
+    raw = os.environ.get("MLFLOW_TRACKING_URI")
+    if raw is None or not str(raw).strip():
+        return
+    raw = str(raw).strip()
+    if raw.startswith(
+        (
+            "http://",
+            "https://",
+            "file:",
+            "databricks",
+            "sqlite:",
+            "postgresql",
+            "mysql",
+            "mssql",
+            "uc:",
+        )
+    ):
+        return
+    try:
+        path = Path(raw).expanduser().resolve()
+    except OSError:
+        return
+    os.environ["MLFLOW_TRACKING_URI"] = path.as_uri()
+
+
 def main():
     args = parse_args()
     ci_mode = args.ci_mode or os.getenv("CI", "").lower() == "true"
+
+    _normalize_mlflow_tracking_uri()
 
     os.makedirs(args.model_output_dir, exist_ok=True)
     os.makedirs(args.artifacts_dir, exist_ok=True)
